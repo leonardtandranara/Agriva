@@ -1,0 +1,6 @@
+{
+  "name": "AGRIVA MADA",
+  "description": "Plateforme agricole intelligente : météo prédictive, marché & prix, wallet simulé et carte interactive des risques de Madagascar.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

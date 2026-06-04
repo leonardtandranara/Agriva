@@ -1,0 +1,56 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- Stylized Madagascar Outline Backdrop in soft gold/green -->
+    <path
+        android:fillColor="#E8F5E9"
+        android:strokeColor="#F9A825"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round"
+        android:pathData="M 59,15 
+                          C 61,16 64,22 66,28 
+                          C 68,34 67,41 66,49 
+                          C 65,57 64,65 63,73 
+                          C 62,79 60,84 56,87 
+                          C 54,89 51,90 48,88 
+                          C 46,86 45,81 44,74 
+                          C 43,67 39,61 38,54 
+                          C 37,47 42,39 46,33 
+                          C 50,27 55,21 59,15 Z" />
+
+    <!-- Lush Green Leaf overlapping the heart of Madagascar -->
+    <path
+        android:fillColor="#2E7D32"
+        android:pathData="M 45,62 
+                          C 32,50 35,32 50,28 
+                          C 65,24 68,42 55,54 
+                          C 50,58 47,60 45,62 Z" />
+
+    <!-- Inner secondary highlight of the leaf top half -->
+    <path
+        android:fillColor="#81C784"
+        android:pathData="M 45,62 
+                          C 39,56 41,44 50,42 
+                          C 52,41 53,42 53,44 
+                          C 49,46 46,54 45,62 Z" />
+
+    <!-- Pure gold central leaf vein and stem reaching out as Madagascar highlands ridge -->
+    <path
+        android:strokeColor="#F9A825"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M 41,68 
+                          Q 45,62 50,28" />
+
+    <!-- Shiny white drop of water (precision intelligence) inside the leaf -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 52,38 
+                          C 50,38 49,40 49,41 
+                          C 49,42 50,43 52,43 
+                          C 54,43 55,42 55,41 
+                          C 55,40 54,38 52,38 Z" />
+</vector>
