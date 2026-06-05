@@ -6,6 +6,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -111,15 +113,95 @@ fun MapTab(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(340.dp)
                     .testTag("interactive_map_canvas"),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    // Custom Draw Grid-Lines for Map tech aesthetic
-                    Canvas(modifier = Modifier.fillMaxSize()) {
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(340.dp)
+                ) {
+                    val mapWidth = maxWidth
+                    val mapHeight = maxHeight
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    
+                    val mapWidthPx = with(density) { mapWidth.toPx() }
+                    val mapHeightPx = with(density) { mapHeight.toPx() }
+                    val mapSizePx = minOf(mapWidthPx, mapHeightPx)
+                    
+                    val mapSizeDp = minOf(mapWidth, mapHeight)
+                    val offsetX = (mapWidth - mapSizeDp) / 2f
+                    val offsetY = (mapHeight - mapSizeDp) / 2f
+                    
+                    val offsetXPx = with(density) { offsetX.toPx() }
+                    val offsetYPx = with(density) { offsetY.toPx() }
+
+                    // Interlocking geometric boundaries of Southern Madagascar (0-100 coordinates scale)
+                    val regionsCoords = mapOf(
+                        "Atsimo-Andrefana" to listOf(
+                            12f to 15f,
+                            44f to 25f,
+                            48f to 60f,
+                            38f to 85f,
+                            18f to 75f,
+                            8f to 45f
+                        ),
+                        "Androy" to listOf(
+                            48f to 60f,
+                            38f to 85f,
+                            45f to 98f,
+                            55f to 92f,
+                            58f to 68f
+                        ),
+                        "Anosy" to listOf(
+                            58f to 68f,
+                            55f to 92f,
+                            78f to 65f,
+                            85f to 38f,
+                            70f to 35f
+                        ),
+                        "Ihorombe" to listOf(
+                            44f to 25f,
+                            48f to 60f,
+                            58f to 68f,
+                            70f to 35f,
+                            68f to 18f,
+                            53f to 15f
+                        )
+                    )
+
+                    val regionCentroids = mapOf(
+                        "Atsimo-Andrefana" to (23f to 50f),
+                        "Androy" to (48f to 81f),
+                        "Anosy" to (70f to 68f),
+                        "Ihorombe" to (58f to 35f)
+                    )
+
+                    // Draw grid layout and Madagascar regions vector paths
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(allWeather) {
+                                detectTapGestures { tapOffset ->
+                                    val normX = (tapOffset.x - offsetXPx) * 100f / mapSizePx
+                                    val normY = (tapOffset.y - offsetYPx) * 100f / mapSizePx
+                                    
+                                    var clickedRegion: String? = null
+                                    for ((regionName, coords) in regionsCoords) {
+                                        if (isPointInPolygon(normX, normY, coords)) {
+                                            clickedRegion = regionName
+                                            break
+                                        }
+                                    }
+                                    if (clickedRegion != null) {
+                                        viewModel.selectMapRegion(clickedRegion)
+                                    }
+                                }
+                            }
+                    ) {
+                        // Custom Draw background gridlines for technical aesthetic
                         val strokeColor = Color.LightGray.copy(alpha = 0.2f)
                         val gridGap = 60.dp.toPx()
                         for (x in 0..size.width.toInt() step gridGap.toInt()) {
@@ -138,74 +220,157 @@ fun MapTab(
                                 strokeWidth = 1f
                             )
                         }
+
+                        // Draw interlocking vector shapes
+                        regionsCoords.forEach { (name, points) ->
+                            val path = Path().apply {
+                                val first = points.first()
+                                moveTo(offsetXPx + first.first * mapSizePx / 100f, offsetYPx + first.second * mapSizePx / 100f)
+                                for (i in 1 until points.size) {
+                                    val p = points[i]
+                                    lineTo(offsetXPx + p.first * mapSizePx / 100f, offsetYPx + p.second * mapSizePx / 100f)
+                                }
+                                close()
+                            }
+
+                            val rLevel = getWeatherRiskForRegion(allWeather, name)
+                            val rColor = getRiskColor(rLevel)
+                            val isSel = selectedRegion == name
+                            val fillAlpha = if (isSel) 0.65f else 0.35f
+                            val strokeW = if (isSel) 4.dp.toPx() else 1.5.dp.toPx()
+                            val strokeCol = if (isSel) Color(0xFFF9A825) else rColor.copy(alpha = 0.8f)
+
+                            // Halo/Glow boundary for selected region
+                            if (isSel) {
+                                drawPath(
+                                    path = path,
+                                    color = strokeCol.copy(alpha = 0.25f),
+                                    style = Stroke(width = strokeW * 2.5f)
+                                )
+                            }
+
+                            // Radial crop suitability overlay gradient
+                            val centroid = regionCentroids[name] ?: (50f to 50f)
+                            drawPath(
+                                path = path,
+                                brush = Brush.radialGradient(
+                                    colors = listOf(rColor.copy(alpha = fillAlpha), rColor.copy(alpha = fillAlpha * 0.4f)),
+                                    center = Offset(offsetXPx + centroid.first * mapSizePx / 100f, offsetYPx + centroid.second * mapSizePx / 100f),
+                                    radius = mapSizePx * 0.4f
+                                )
+                            )
+
+                            // Vector Outline path
+                            drawPath(
+                                path = path,
+                                color = strokeCol,
+                                style = Stroke(width = strokeW)
+                            )
+                        }
                     }
 
-                    // Interactive Region Buttons placed representationally like Southern Madagascar Geography:
-                    // Ihorombe is center-north inland. Atsimo-Andrefana is west coast.
-                    // Androy is southernmost tip. Anosy is south-eastern coast.
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        // Region: Atsimo-Andrefana (West Coast)
-                        RegionNode(
-                            name = "Atsimo-Andrefana",
-                            riskLevel = getWeatherRiskForRegion(allWeather, "Atsimo-Andrefana"),
-                            productCount = activeProducts.count { it.region == "Atsimo-Andrefana" },
-                            isSelected = selectedRegion == "Atsimo-Andrefana",
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .offset(x = 20.dp, y = (-20).dp),
-                            onClick = { viewModel.selectMapRegion("Atsimo-Andrefana") }
-                        )
+                    // Interactive overlay metadata indicators in Madagascar geography
+                    regionCentroids.forEach { (name, centroid) ->
+                        val rLevel = getWeatherRiskForRegion(allWeather, name)
+                        val rColor = getRiskColor(rLevel)
+                        val isSel = selectedRegion == name
+                        
+                        val (emoji, riskText) = when (name) {
+                            "Androy" -> "☀️" to "Haintany / Sec"
+                            "Anosy" -> "🌧️" to "Rano / Saforano"
+                            "Ihorombe" -> "💨" to "Tafio / Rivotra"
+                            "Atsimo-Andrefana" -> "🍃" to "Salama / Optimal"
+                            else -> "🌍" to "Milamina"
+                        }
 
-                        // Region: Ihorombe (Inland Highlands)
-                        RegionNode(
-                            name = "Ihorombe",
-                            riskLevel = getWeatherRiskForRegion(allWeather, "Ihorombe"),
-                            productCount = activeProducts.count { it.region == "Ihorombe" },
-                            isSelected = selectedRegion == "Ihorombe",
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .offset(x = 40.dp, y = 30.dp),
-                            onClick = { viewModel.selectMapRegion("Ihorombe") }
-                        )
+                        // Compute absolute Dp coordinates for overlay tags
+                        val leftDp = offsetX + (mapSizeDp * (centroid.first / 100f))
+                        val topDp = offsetY + (mapSizeDp * (centroid.second / 100f))
 
-                        // Region: Anosy (Southeast Coast)
-                        RegionNode(
-                            name = "Anosy",
-                            riskLevel = getWeatherRiskForRegion(allWeather, "Anosy"),
-                            productCount = activeProducts.count { it.region == "Anosy" },
-                            isSelected = selectedRegion == "Anosy",
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = (-30).dp, y = (-40).dp),
-                            onClick = { viewModel.selectMapRegion("Anosy") }
-                        )
-
-                        // Region: Androy (Extreme Southern Tip)
-                        RegionNode(
-                            name = "Androy",
-                            riskLevel = getWeatherRiskForRegion(allWeather, "Androy"),
-                            productCount = activeProducts.count { it.region == "Androy" },
-                            isSelected = selectedRegion == "Androy",
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .offset(x = (-10).dp, y = (-10).dp),
-                            onClick = { viewModel.selectMapRegion("Androy") }
-                        )
-
-                        // Compass Indicator on Map
                         Box(
                             modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(12.dp)
-                                .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(10.dp))
-                                .border(1.dp, Color(0xFFE2E8F0), shape = RoundedCornerShape(10.dp))
-                                .padding(8.dp)
+                                .offset(
+                                    x = leftDp - 60.dp,
+                                    y = topDp - 26.dp
+                                )
+                                .width(120.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("AVARATRA (N)", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                                Icon(Icons.Default.Navigation, contentDescription = "compass", modifier = Modifier.size(18.dp), tint = AgrivaGreen)
-                                Text("TOLIARA SCALE", fontSize = 8.sp, color = Color.Gray)
+                            Card(
+                                modifier = Modifier
+                                    .clickable { viewModel.selectMapRegion(name) }
+                                    .testTag("map_region_$name"),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSel) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                                ),
+                                border = BorderStroke(
+                                    if (isSel) 2.dp else 1.dp,
+                                    if (isSel) Color(0xFFF9A825) else rColor.copy(alpha = 0.5f)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                elevation = CardDefaults.cardElevation(defaultElevation = if (isSel) 4.dp else 1.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(text = emoji, fontSize = 11.sp)
+                                        Text(
+                                            text = name,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    Text(
+                                        text = riskText,
+                                        fontSize = 7.sp,
+                                        color = rColor,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
+                        }
+                    }
+
+                    // Legend Panel inside Map
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(10.dp)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), shape = RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0xFFE2E8F0), shape = RoundedCornerShape(8.dp))
+                            .padding(6.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("FANAFALANA LOZA / ANALYSE:", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                LegendItem(color = Color(0xFF2E7D32), text = "🍃 Salama")
+                                LegendItem(color = Color(0xFFF9A825), text = "🌧️ Orana")
+                                LegendItem(color = Color(0xFFEF6C00), text = "💨 Rivotra")
+                                LegendItem(color = Color(0xFFC62828), text = "☀️ Haintany")
+                            }
+                        }
+                    }
+
+                    // Compass Indicator on Map
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(12.dp)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), shape = RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFFE2E8F0), shape = RoundedCornerShape(10.dp))
+                            .padding(8.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("AVARATRA (N)", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                            Icon(Icons.Default.Navigation, contentDescription = "compass", modifier = Modifier.size(16.dp), tint = AgrivaGreen)
+                            Text("MADAGASCAR S.", fontSize = 7.sp, color = Color.Gray)
                         }
                     }
                 }
@@ -229,12 +394,25 @@ fun MapTab(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Faritra : $selectedRegion",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Column {
+                                Text(
+                                    text = "Faritra : $selectedRegion",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = when(selectedRegion) {
+                                        "Androy" -> "Faritra atsimo farany • Maindry sy mafana"
+                                        "Anosy" -> "Antsinanana atsimo • Mandona ary manamorona ranomasina"
+                                        "Ihorombe" -> "Imofampana • Lembalemba avo sy be tafio-drivotra"
+                                        "Atsimo-Andrefana" -> "Andrefana • Velaran-tany tsara fanondrahana"
+                                        else -> "Iraisan-karazany"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
 
                             RiskIndicatorBadge(riskLevel = regionWeather.riskLevel)
                         }
@@ -275,6 +453,74 @@ fun MapTab(
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
+
+                        // Focus Crop Vulnerability Analysis Section
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = when (regionWeather.riskLevel) {
+                                    "ROUGE" -> Color(0xFFC62828).copy(alpha = 0.05f)
+                                    "ORANGE" -> Color(0xFFEF6C00).copy(alpha = 0.05f)
+                                    "JAUNE" -> Color(0xFFF9A825).copy(alpha = 0.05f)
+                                    else -> AgrivaGreen.copy(alpha = 0.05f)
+                                }
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                when (regionWeather.riskLevel) {
+                                    "ROUGE" -> Color(0xFFC62828).copy(alpha = 0.2f)
+                                    "ORANGE" -> Color(0xFFEF6C00).copy(alpha = 0.2f)
+                                    "JAUNE" -> Color(0xFFF9A825).copy(alpha = 0.2f)
+                                    else -> AgrivaGreen.copy(alpha = 0.2f)
+                                }
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = when(regionWeather.riskLevel) {
+                                            "ROUGE" -> Icons.Default.Warning
+                                            "ORANGE" -> Icons.Default.Air
+                                            "JAUNE" -> Icons.Default.WaterDrop
+                                            else -> Icons.Default.CheckCircle
+                                        },
+                                        contentDescription = "Risk Indicator",
+                                        tint = when(regionWeather.riskLevel) {
+                                            "ROUGE" -> Color(0xFFC62828)
+                                            "ORANGE" -> Color(0xFFEF6C00)
+                                            "JAUNE" -> Color(0xFFF9A825)
+                                            else -> Color(0xFF2E7D32)
+                                        },
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Vulnerability diagnosis / Diagnostika Agronomika",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                
+                                Text(
+                                    text = when (selectedRegion) {
+                                        "Androy" -> "RISIQUE DE SECHERESSE EXTRÊME : Le déficit hydrique sévère (0mm de pluie) menace les parcelles de Maïs et Sorgho. Risque de flétrissement permanent. Recommandation : Activer l'irrigation d'appoint et pailler les sols."
+                                        "Anosy" -> "RISQUE D'EROSION & INONDATION : Les pluies intenses de mousson (${regionWeather.rain}mm) provoquent le lessivage des nutriments dans les cultures maraîchères. Recommandation : Aménager des canaux d'évacuation."
+                                        "Ihorombe" -> "RISQUE DE DEGATS STRUCTURELS : Des rafales de vent soutenues (${regionWeather.wind}km/h) risquent de casser les tiges de haricots et de dessécher prématurément la litière forestière. Recommandation : Brise-vents végétaux."
+                                        "Atsimo-Andrefana" -> "SITUATION HYDROLOGIQUE OPTIMALE : Des conditions idéales combinant ensoleillement et précipitations favorisent la riziculture (Riz Gasy) ainsi que l'arachide. Rentabilité maximale estimée."
+                                        else -> "Diagnostic général de résilience."
+                                    },
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         // Active market products count
                         Row(
@@ -330,70 +576,31 @@ fun MapTab(
 }
 
 @Composable
-fun RegionNode(
-    name: String,
-    riskLevel: String,
-    productCount: Int,
-    isSelected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val riskColor = getRiskColor(riskLevel)
-    val borderStroke = if (isSelected) BorderStroke(3.dp, AgrivaYellow) else BorderStroke(1.dp, riskColor.copy(alpha = 0.5f))
-    val containerCol = if (isSelected) riskColor.copy(alpha = 0.35f) else riskColor.copy(alpha = 0.2f)
-
-    Card(
-        modifier = modifier
-            .width(150.dp)
-            .clickable { onClick() }
-            .testTag("map_region_$name"),
-        colors = CardDefaults.cardColors(containerColor = containerCol),
-        border = borderStroke,
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = name,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // Little ping dot
-                Canvas(modifier = Modifier.size(8.dp)) {
-                    drawCircle(color = riskColor)
-                }
-                Text(
-                    text = "Lojika: $riskLevel",
-                    fontSize = 10.sp,
-                    color = riskColor,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), shape = RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = "$productCount vokatra",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
+fun LegendItem(color: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(modifier = Modifier.size(8.dp).background(color, shape = RoundedCornerShape(2.dp)))
+        Text(text = text, fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = Color.DarkGray)
     }
 }
+
+// Ray casting algorithm for pixel-precise region SVG hit testing
+fun isPointInPolygon(px: Float, py: Float, polygon: List<Pair<Float, Float>>): Boolean {
+    var intersectCount = 0
+    val count = polygon.size
+    for (i in 0 until count) {
+        val p1 = polygon[i]
+        val p2 = polygon[(i + 1) % count]
+        if (((p1.second > py) != (p2.second > py)) &&
+            (px < (p2.first - p1.first) * (py - p1.second) / (p2.second - p1.second) + p1.first)
+        ) {
+            intersectCount++
+        }
+    }
+    return intersectCount % 2 != 0
+}
+
+@Composable
+fun DummyRegionNodeToAvoidCompileErrors() {}
 
 @Composable
 fun WeatherIndicatorMini(
